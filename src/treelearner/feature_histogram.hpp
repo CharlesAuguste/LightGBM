@@ -83,7 +83,7 @@ public:
 
   void FindBestThreshold(double sum_gradient, double sum_hessian,
                          data_size_t num_data,
-                         const LeafConstraints &constraints,
+                         const ConstraintEntry& constraints,
                          SplitInfo* output) {
     output->default_left = true;
     output->gain = kMinScore;
@@ -93,7 +93,7 @@ public:
 
   void FindBestThresholdNumerical(double sum_gradient, double sum_hessian,
                                   data_size_t num_data,
-                                  const LeafConstraints &constraints,
+                                  const ConstraintEntry& constraints,
                                   SplitInfo* output) {
     is_splittable_ = false;
     double gain_shift = GetLeafSplitGain(sum_gradient, sum_hessian,
@@ -120,7 +120,7 @@ public:
 
   void FindBestThresholdCategorical(double sum_gradient, double sum_hessian,
                                     data_size_t num_data,
-                                    const LeafConstraints &constraints,
+                                    const ConstraintEntry& constraints,
                                     SplitInfo* output) {
     output->default_left = false;
     double best_gain = kMinScore;
@@ -480,7 +480,7 @@ private:
                               double sum_right_gradients,
                               double sum_right_hessians, double l1, double l2,
                               double max_delta_step,
-                              const LeafConstraints &constraints,
+                              const ConstraintEntry& constraints,
                               int8_t monotone_constraint) {
     double left_output =
         CalculateSplittedLeafOutput(sum_left_gradients, sum_left_hessians, l1,
@@ -504,13 +504,12 @@ private:
   */
   static double
   CalculateSplittedLeafOutput(double sum_gradients, double sum_hessians,
-                              double l1, double l2, double max_delta_step,
-                              const LeafConstraints &constraints) {
+                              double l1, double l2, double max_delta_step, const ConstraintEntry& constraints) {
     double ret = CalculateSplittedLeafOutput(sum_gradients, sum_hessians, l1, l2, max_delta_step);
-    if (ret < constraints.min_constraint) {
-      ret = constraints.min_constraint;
-    } else if (ret > constraints.max_constraint) {
-      ret = constraints.max_constraint;
+    if (ret < constraints.min) {
+      ret = constraints.min;
+    } else if (ret > constraints.max) {
+      ret = constraints.max;
     }
     return ret;
   }
@@ -533,7 +532,7 @@ private:
 
   void FindBestThresholdSequence(double sum_gradient, double sum_hessian,
                                  data_size_t num_data,
-                                 const LeafConstraints &constraints,
+                                 const ConstraintEntry& constraints,
                                  double min_gain_shift, SplitInfo* output,
                                  int dir, bool skip_default_bin,
                                  bool use_na_as_missing) {
@@ -689,7 +688,9 @@ private:
   hist_t* data_;
   bool is_splittable_ = true;
 
-  std::function<void(double, double, data_size_t, const LeafConstraints&, SplitInfo*)> find_best_threshold_fun_;
+  std::function<void(double, double, data_size_t, const ConstraintEntry&,
+                     SplitInfo*)>
+      find_best_threshold_fun_;
 };
 class HistogramPool {
 public:
