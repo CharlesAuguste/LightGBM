@@ -530,6 +530,11 @@ int32_t SerialTreeLearner::ForceSplits(Tree* tree, const Json& forced_split_json
     SplitInfo current_split_info = forceSplitMap[current_leaf];
     const int inner_feature_index = train_data_->InnerFeatureIndex(
             current_split_info.feature);
+    // we want to know if the feature has to be monotone
+    bool feature_is_monotone = false;
+    if (!config_->monotone_constraints.empty()) {
+        feature_is_monotone = config_->monotone_constraints[inner_feature_index] != 0;
+    }
     auto threshold_double = train_data_->RealThreshold(
             inner_feature_index, current_split_info.threshold);
 
@@ -549,7 +554,7 @@ int32_t SerialTreeLearner::ForceSplits(Tree* tree, const Json& forced_split_json
                                 static_cast<double>(current_split_info.right_sum_hessian),
                                 static_cast<float>(current_split_info.gain),
                                 train_data_->FeatureBinMapper(inner_feature_index)->missing_type(),
-                                current_split_info.default_left);
+                                current_split_info.default_left, feature_is_monotone);
       data_partition_->Split(current_leaf, train_data_, inner_feature_index,
                              &current_split_info.threshold, 1,
                              current_split_info.default_left, *right_leaf);
@@ -650,7 +655,8 @@ void SerialTreeLearner::Split(Tree* tree, int best_leaf, int* left_leaf, int* ri
       static_cast<double>(best_split_info.right_sum_hessian),
       static_cast<float>(best_split_info.gain),
       train_data_->FeatureBinMapper(inner_feature_index)->missing_type(),
-      best_split_info.default_left);
+      best_split_info.default_left,
+      best_split_info.monotone_type != 0);
   } else {
     std::vector<uint32_t> cat_bitset_inner = Common::ConstructBitset(best_split_info.cat_threshold.data(), best_split_info.num_cat_threshold);
     std::vector<int> threshold_int(best_split_info.num_cat_threshold);
