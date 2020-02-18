@@ -81,6 +81,7 @@ const std::unordered_map<std::string, std::string>& Config::alias_table() {
   {"lambda", "lambda_l2"},
   {"min_split_gain", "min_gain_to_split"},
   {"rate_drop", "drop_rate"},
+  {"monotone_constraining_method", "monotone_constraints_method"},
   {"topk", "top_k"},
   {"mc", "monotone_constraints"},
   {"monotone_constraint", "monotone_constraints"},
@@ -200,6 +201,7 @@ const std::unordered_set<std::string>& Config::parameter_set() {
   "lambda_l2",
   "min_gain_to_split",
   "drop_rate",
+  "monotone_constraints_method",
   "max_drop",
   "skip_drop",
   "xgboost_dart_mode",
@@ -369,6 +371,8 @@ void Config::GetMembersFromString(const std::unordered_map<std::string, std::str
   GetDouble(params, "drop_rate", &drop_rate);
   CHECK(drop_rate >=0.0);
   CHECK(drop_rate <=1.0);
+
+  GetString(params, "monotone_constraints_method", &monotone_constraints_method);
 
   GetInt(params, "max_drop", &max_drop);
 
@@ -617,6 +621,7 @@ std::string Config::SaveMembersToString() const {
   str_buf << "[lambda_l1: " << lambda_l1 << "]\n";
   str_buf << "[lambda_l2: " << lambda_l2 << "]\n";
   str_buf << "[min_gain_to_split: " << min_gain_to_split << "]\n";
+  str_buf << "[monotone_constraints_method: " << monotone_constraints_method << "]\n";
   str_buf << "[drop_rate: " << drop_rate << "]\n";
   str_buf << "[max_drop: " << max_drop << "]\n";
   str_buf << "[skip_drop: " << skip_drop << "]\n";
