@@ -736,7 +736,7 @@ void SerialTreeLearner::Split(Tree* tree, int best_leaf, int* left_leaf, int* ri
         constraints_->leaves_to_update.pop_back();
       }
     } else {
-      throw "monotone_constraints_methode has to be one of ('basic', "
+      throw "monotone_constraints_method has to be one of ('basic', "
             "'intermediate')"; // FIXME improve how this exception is handled
     }
   }
