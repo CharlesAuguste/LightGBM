@@ -89,6 +89,11 @@ class SerialTreeLearner: public TreeLearner {
                                   const LeafSplits* leaf_splits,
                                   SplitInfo* best_split);
 
+  void UpdateBestSplitsFromHistograms(
+      SplitInfo *split, int leaf, const std::vector<int8_t> &is_feature_used_,
+      int num_features_, HistogramPool &histogram_pool_,
+      LearnerState &learner_state);
+
   void GetMultiValBin(const Dataset* dataset, bool is_first_time);
 
   virtual std::vector<int8_t> GetUsedFeatures(bool is_tree_level);
