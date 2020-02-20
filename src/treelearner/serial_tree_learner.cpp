@@ -533,7 +533,7 @@ int32_t SerialTreeLearner::ForceSplits(Tree* tree, const Json& forced_split_json
     // we want to know if the feature has to be monotone
     bool feature_is_monotone = false;
     if (!config_->monotone_constraints.empty()) {
-        feature_is_monotone = config_->monotone_constraints[inner_feature_index] != 0;
+        feature_is_monotone = config_->monotone_constraints[current_split_info.feature] != 0;
     }
     auto threshold_double = train_data_->RealThreshold(
             inner_feature_index, current_split_info.threshold);
