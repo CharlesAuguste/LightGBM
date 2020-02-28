@@ -89,10 +89,7 @@ class SerialTreeLearner: public TreeLearner {
                                   const LeafSplits* leaf_splits,
                                   SplitInfo* best_split);
 
-  void UpdateBestSplitsFromHistograms(
-      SplitInfo *split, int leaf, const std::vector<int8_t> &is_feature_used_,
-      int num_features_, HistogramPool &histogram_pool_,
-      LearnerState &learner_state);
+  void RecomputeBestSplitForLeaf(int leaf, SplitInfo* split);
 
   void GetMultiValBin(const Dataset* dataset, bool is_first_time);
 
@@ -164,7 +161,7 @@ class SerialTreeLearner: public TreeLearner {
   /*! \brief store best split per feature for all leaves */
   std::vector<SplitInfo> splits_per_leaf_;
   /*! \brief stores minimum and maximum constraints for each leaf */
-  std::unique_ptr<LeafConstraints<ConstraintEntry>> constraints_;
+  std::unique_ptr<LeafConstraintsBase> constraints_;
 
   /*! \brief stores best thresholds for all feature for smaller leaf */
   std::unique_ptr<LeafSplits> smaller_leaf_splits_;

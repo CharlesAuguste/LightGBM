@@ -53,7 +53,7 @@ void SerialTreeLearner::Init(const Dataset* train_data, bool is_constant_hessian
 
   // push split information for all leaves
   best_split_per_leaf_.resize(config_->num_leaves);
-  constraints_.reset(new LeafConstraints<ConstraintEntry>(config_->num_leaves));
+  constraints_.reset(LeafConstraintsBase::Create(config_, config_->num_leaves));
 
   // initialize splits for leaf
   smaller_leaf_splits_.reset(new LeafSplits(train_data_->num_data()));
@@ -145,6 +145,7 @@ void SerialTreeLearner::ResetConfig(const Config* config) {
     cegb_.reset(new CostEfficientGradientBoosting(this));
     cegb_->Init();
   }
+  constraints_.reset(LeafConstraintsBase::Create(config_, config_->num_leaves));
 }
 
 Tree* SerialTreeLearner::Train(const score_t* gradients, const score_t *hessians, bool is_constant_hessian, const Json& forced_split_json) {
@@ -530,11 +531,6 @@ int32_t SerialTreeLearner::ForceSplits(Tree* tree, const Json& forced_split_json
     SplitInfo current_split_info = forceSplitMap[current_leaf];
     const int inner_feature_index = train_data_->InnerFeatureIndex(
             current_split_info.feature);
-    // we want to know if the feature has to be monotone
-    bool feature_is_monotone = false;
-    if (!config_->monotone_constraints.empty()) {
-        feature_is_monotone = config_->monotone_constraints[current_split_info.feature] != 0;
-    }
     auto threshold_double = train_data_->RealThreshold(
             inner_feature_index, current_split_info.threshold);
 
@@ -554,7 +550,7 @@ int32_t SerialTreeLearner::ForceSplits(Tree* tree, const Json& forced_split_json
                                 static_cast<double>(current_split_info.right_sum_hessian),
                                 static_cast<float>(current_split_info.gain),
                                 train_data_->FeatureBinMapper(inner_feature_index)->missing_type(),
-                                current_split_info.default_left, feature_is_monotone);
+                                current_split_info.default_left);
       data_partition_->Split(current_leaf, train_data_, inner_feature_index,
                              &current_split_info.threshold, 1,
                              current_split_info.default_left, *right_leaf);
@@ -634,6 +630,10 @@ void SerialTreeLearner::Split(Tree* tree, int best_leaf, int* left_leaf, int* ri
   *left_leaf = best_leaf;
   auto next_leaf_id = tree->NextLeafId();
 
+  // update before tree split
+  constraints_->BeforeSplit(tree, best_leaf, next_leaf_id,
+                            best_split_info.monotone_type);
+
   bool is_numerical_split = train_data_->FeatureBinMapper(inner_feature_index)->bin_type() == BinType::NumericalBin;
   if (is_numerical_split) {
     auto threshold_double = train_data_->RealThreshold(inner_feature_index, best_split_info.threshold);
@@ -655,8 +655,7 @@ void SerialTreeLearner::Split(Tree* tree, int best_leaf, int* left_leaf, int* ri
       static_cast<double>(best_split_info.right_sum_hessian),
       static_cast<float>(best_split_info.gain),
       train_data_->FeatureBinMapper(inner_feature_index)->missing_type(),
-      best_split_info.default_left,
-      best_split_info.monotone_type != 0);
+      best_split_info.default_left);
   } else {
     std::vector<uint32_t> cat_bitset_inner = Common::ConstructBitset(best_split_info.cat_threshold.data(), best_split_info.num_cat_threshold);
     std::vector<int> threshold_int(best_split_info.num_cat_threshold);
@@ -702,43 +701,14 @@ void SerialTreeLearner::Split(Tree* tree, int best_leaf, int* left_leaf, int* ri
     smaller_leaf_splits_->Init(*right_leaf, data_partition_.get(), best_split_info.right_sum_gradient, best_split_info.right_sum_hessian);
     larger_leaf_splits_->Init(*left_leaf, data_partition_.get(), best_split_info.left_sum_gradient, best_split_info.left_sum_hessian);
   }
-
-  // constraints are updated differently depending on the method used
-  if (!config_->monotone_constraints.empty() &&
-      tree->leaf_is_in_monotone_subtree(*right_leaf)) {
-    if (config_->monotone_constraints_method == "basic") {
-      constraints_->UpdateConstraintsWithMid(
-          is_numerical_split, *left_leaf, *right_leaf,
-          best_split_info.monotone_type, best_split_info.right_output,
-          best_split_info.left_output);
-
-    } else if (config_->monotone_constraints_method == "intermediate") {
-      constraints_->UpdateConstraintsWithOutputs(
-          is_numerical_split, *left_leaf, *right_leaf,
-          best_split_info.monotone_type, best_split_info.right_output,
-          best_split_info.left_output);
-
-      LearnerState learner_state(config_, train_data_, tree, cegb_);
-
-      // if there is a monotone split above, new values should
-      // be checked not to clash with existing constraints in the subtree;
-      // if they do, the existing splits need to be updated
-      constraints_->GoUpToFindLeavesToUpdate(
-          tree->leaf_parent(*right_leaf), inner_feature_index, best_split_info,
-          best_split_info.threshold, best_split_per_leaf_, learner_state);
-
-      // Update splits that just got their constraints updated
-      while (!constraints_->leaves_to_update.empty()) {
-        int leaf_idx = constraints_->leaves_to_update.back();
-        UpdateBestSplitsFromHistograms(
-            &best_split_per_leaf_[leaf_idx], leaf_idx, is_feature_used_,
-            num_features_, histogram_pool_, learner_state);
-        constraints_->leaves_to_update.pop_back();
-      }
-    } else {
-      throw "monotone_constraints_method has to be one of ('basic', "
-            "'intermediate')"; // FIXME improve how this exception is handled
-    }
+  auto leaves_need_update = constraints_->Update(
+      tree, is_numerical_split, *left_leaf, *right_leaf,
+      best_split_info.monotone_type, best_split_info.right_output,
+      best_split_info.left_output, inner_feature_index, best_split_info,
+      best_split_per_leaf_);
+  // update leave outputs if needed
+  for (auto leaf: leaves_need_update) {
+    RecomputeBestSplitForLeaf(leaf, &best_split_per_leaf_[leaf]);
   }
 }
 
@@ -804,51 +774,43 @@ void SerialTreeLearner::ComputeBestSplitForFeature(
   }
 }
 
-
-// this function updates the best split for a leaf
-// it is called only when monotone constraints exist
-void SerialTreeLearner::UpdateBestSplitsFromHistograms(
-    SplitInfo *split, int leaf,
-    const std::vector<int8_t> &is_feature_used_,
-    int num_features_, HistogramPool &histogram_pool_,
-    LearnerState &learner_state) {
-  // the feature histogram is retrieved
-  FeatureHistogram *histogram_array_;
-  histogram_pool_.Get(leaf, &histogram_array_);
+void SerialTreeLearner::RecomputeBestSplitForLeaf(int leaf, SplitInfo* split) {
+  FeatureHistogram* histogram_array_;
+  if (!histogram_pool_.Get(leaf, &histogram_array_)) {
+    Log::Warning(
+        "Get historical Histogram for leaf %d failed, will skip the "
+        "``RecomputeBestSplitForLeaf``",
+        leaf);
+    return;
+  }
   double sum_gradients = split->left_sum_gradient + split->right_sum_gradient;
   double sum_hessians = split->left_sum_hessian + split->right_sum_hessian;
   int num_data = split->left_count + split->right_count;
-  split->gain = kMinScore;
+
+  std::vector<SplitInfo> bests(num_threads_);
+  LeafSplits leaf_splits(num_data);
+  leaf_splits.Init(leaf, sum_gradients, sum_hessians);
 
   OMP_INIT_EX();
-#pragma omp parallel for schedule(static, 1024) if (num_features_ >= 2048)
+// find splits
+#pragma omp parallel for schedule(static)
   for (int feature_index = 0; feature_index < num_features_; ++feature_index) {
     OMP_LOOP_EX_BEGIN();
-    // splits are computed for the feature that are to be used
-    if (!histogram_array_[feature_index].is_splittable()) {
+    if (!is_feature_used_[feature_index]) {
       continue;
     }
-
-    // loop through the features to find the best one just like in the
-    // FindBestSplitsFromHistograms function
-    int real_fidx = learner_state.train_data_->RealFeatureIndex(feature_index);
-    LeafSplits *leaf_splits = new LeafSplits(0);
-    leaf_splits->Init(leaf, sum_gradients,
-                     sum_hessians);
-
-    // best split is updated
+    const int tid = omp_get_thread_num();
+    int real_fidx = train_data_->RealFeatureIndex(feature_index);
     ComputeBestSplitForFeature(
-        histogram_array_,
-        feature_index,
-        real_fidx,
-        is_feature_used_[feature_index], // FIXME is this the right parameter to pass here?
-        num_data,
-        leaf_splits,
-        split);
+        smaller_leaf_histogram_array_, feature_index, real_fidx,
+        true,  // fixme: this cannot work with colsample_bynode, but do we really need to compute all features? why not just the used features of `split->feature`?
+        num_data, &leaf_splits, &bests[tid]);
 
     OMP_LOOP_EX_END();
   }
   OMP_THROW_EX();
+  auto best_idx = ArrayArgs<SplitInfo>::ArgMax(bests);
+  *split = bests[best_idx];
 }
 
 }  // namespace LightGBM
